@@ -4,14 +4,11 @@
 #define SLAVE_ADDR 0x09
 #define BTN_PIN 2
 
-enum cmd {set_time, set_alarm, set_timer, cmd_up, cmd_down};
-SevSeg sevseg;
-
 // We're measuring seconds as the most granular unit of time
 unsigned seconds = 0;
+SevSeg seg;
 
-void setup()
-{
+void setup() {
   Serial.begin(9600);
   Serial.println("Slave");
 
@@ -22,8 +19,8 @@ void setup()
   bool resistorsOnSegments = true;
   bool updateWithDelaysIn = true;
   byte hardwareConfig = COMMON_CATHODE;
-  sevseg.begin(hardwareConfig, numDigits, digitPins, segmentPins, resistorsOnSegments);
-  sevseg.setBrightness(90);
+  seg.begin(hardwareConfig, numDigits, digitPins, segmentPins, resistorsOnSegments);
+  seg.setBrightness(90);
 
   pinMode(BTN_PIN, INPUT_PULLUP);
   attachInterrupt(0,btn_pressed,FALLING);
@@ -47,29 +44,41 @@ void setup()
 
 ISR(TIMER1_COMPA_vect) {
   ++seconds;
-  Serial.print(seconds); Serial.print(" seconds\n");
 }
 
 void btn_pressed()
 {
 }
 
+enum USER_INPUT {SET_TIME, SET_ALARM, SET_TIMER, CMD_UP, CMD_DOWN};
+USER_INPUT input;
 void recvEvent(int bytes) {
   while(Wire.available()) {
-    int cmd = Wire.read();
-    Serial.print(cmd);         // print the character
+    input = Wire.read();
+    Serial.print(input);         // print the character
   }
 }
 
-unsigned make_display_value() {
+unsigned makeDisplayValue() {
   unsigned minutes = seconds % 60;
   unsigned hours = (seconds/60) % 60;
 
   return (hours * 100) + (minutes);
 }
 
-void loop()
-{
-  sevseg.setNumber(make_display_value(), 2);
-  sevseg.refreshDisplay();
+enum STATE {SETTING_TIME, DISPLAY_TIME};
+STATE state = DISPLAY_TIME;
+void loop() {
+  switch (state) {
+    case DISPLAY_TIME:
+      seg.setNumber(makeDisplayValue(), 2);
+      break;
+    case SETTING_TIME:
+      if (seconds % 2 == 0)
+        seg.blank();
+      else
+        seg.setNumber(0, 2);
+      break;
+  }
+  seg.refreshDisplay();
 }
