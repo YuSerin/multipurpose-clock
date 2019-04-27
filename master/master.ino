@@ -18,10 +18,6 @@ enum cmd {set_time, set_alarm, set_timer, cmd_up, cmd_down};
 
 IRrecv irrecv(RECV_PIN);
 decode_results results;
-//char remote_cmd[100];
-//String remote_cmd;
-//int remote_cmd;
-//int x = 0;
 
 void setup()
 {
@@ -29,32 +25,12 @@ void setup()
   
   Wire.begin(); // Connect to slave //
   irrecv.enableIRIn(); // Start the receiver
-  //remote_cmd = 0;
-  //x = 0;
-  //Serial.println("Master");
 }
 
 void loop()
-{
-//  if(x < 100) {
-//    Wire.beginTransmission(SLAVE_ADDR); // transmit to device #9
-//  Wire.write("x is ");        // sends five bytes
-//  Wire.write(x);              // sends one byte
-//  Wire.endTransmission();    // stop transmitting
-//  x++;
-//  delay(1000);
-//  }
-  
+{ 
   if (irrecv.decode(&results))
     {
-     //Serial.println(String(results.value, HEX));
-     //Serial.println(results.value);
-     
-     //remote_cmd = int(results.value);
-     //Serial.println(remote_cmd);
-     //delay(100);
-     //String(results.value, HEX).toCharArray(remote_cmd, 100);
-     //Serial.println(remote_cmd);
      switch(results.value) {
       case btn_1: transmit(set_time);
       break;
@@ -69,8 +45,6 @@ void loop()
       case btn_down: transmit(cmd_down);
       break;
      }
-     delay(100);
-     //transmit(remote_cmd);
      irrecv.resume(); // Receive the next value
     }
 }
