@@ -50,12 +50,16 @@ void btn_pressed()
 {
 }
 
-enum USER_INPUT {SET_TIME, SET_ALARM, SET_TIMER, CMD_UP, CMD_DOWN};
-USER_INPUT input;
+enum class Button {
+  power, volUp, funcStop, skipBack, play, skipForward,
+  down, volDown, up, zero, eq, stRept, one, two, three,
+  four, five, six, seven, eight, nine, repeat
+};
+Button input;
+
 void recvEvent(int bytes) {
   while(Wire.available()) {
-    input = Wire.read();
-    Serial.print(input);         // print the character
+    input = (Button)Wire.read();
   }
 }
 
@@ -66,14 +70,18 @@ unsigned makeDisplayValue() {
   return (hours * 100) + (minutes);
 }
 
-enum STATE {SETTING_TIME, DISPLAY_TIME};
-STATE state = DISPLAY_TIME;
+enum class State {setTime, displayTime};
+State state = State::displayTime;
 void loop() {
+  if (input == Button::one)
+    state = State::displayTime;
+  else if (input == Button::two)
+    state = State::setTime;
   switch (state) {
-    case DISPLAY_TIME:
+    case State::displayTime:
       seg.setNumber(makeDisplayValue(), 2);
       break;
-    case SETTING_TIME:
+    case State::setTime:
       if (seconds % 2 == 0)
         seg.blank();
       else
