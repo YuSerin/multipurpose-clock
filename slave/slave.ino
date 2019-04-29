@@ -5,25 +5,37 @@
 #define BTN_PIN 2
 #define LED_PIN 0
 #define SEC_PER_HOUR 3600
+#define SEC_PER_DAY 86400
 
-enum class Button {
+enum class IRInput {
   power, volUp, funcStop, skipBack, play, skipForward,
   down, volDown, up, zero, eq, stRept, one, two, three,
   four, five, six, seven, eight, nine, repeat, none
 };
 
 enum class State {
-  setTime, displayTime
+  setTime, displayTime, setAlarm, alarmTriggered
 };
 
-// We're measuring seconds as the most granular unit of time
-long time = 0;
+struct Clock {
+  State state;
+  long time; // We're measuring seconds as the most granular unit of time
+  long newTime; // For setting a new time
+  IRInput input; // Most recent unprocessed input
+} clock; // Need a global instance of this for the interrupt handlers to use
+
 SevSeg seg;
 
 // NOTE:
 // Serial functions can't be used here because they'll interfere with usage
 // of ports 0 and 1
 void setup() {
+
+  // Initialize state
+  clock.time = 0;
+  clock.newTime = 0;
+  clock.state = State::displayTime;
+  clock.input = IRInput::none;
 
   // Segment display init
   byte numDigits = 4;
@@ -62,105 +74,109 @@ void setup() {
 }
 
 ISR(TIMER1_COMPA_vect) {
-  ++time;
-  if (time == 86400) // 24 hours worth of seconds, rollover
-    time = 0;
+  ++clock.time;
+  if (clock.time == SEC_PER_DAY)
+    clock.time = 0;
 }
 
 void btn_pressed()
 {
 }
 
-Button input;
 
 void recvEvent(int bytes) {
   while(Wire.available()) {
-    input = (Button)Wire.read();
+    clock.input = (IRInput)Wire.read();
   }
 }
 
 
 // State builders
-State state = State::setTime;
 
-State fromDisplayTime(Button input) {
-  switch (input) {
-    case Button::one:
-      return State::setTime;
-    default:
-      return State::displayTime;
+void updateFromDisplayTime() {
+  switch (clock.input) {
+  case IRInput::one:
+    clock.state = State::setTime;
+    break;
+  case IRInput::two:
+    clock.state = State::setAlarm;
+  default:
+    return;
   }
 }
 
 long calcSecondsByHHMMPlace(int place, int multiplier) {
   switch (place) {
-    case 3: // Tens of hours
-      return (10L * SEC_PER_HOUR * multiplier);
-    case 2: // Hours
-      return (SEC_PER_HOUR * multiplier);
-    case 1: // Tens of minutes
-      return (10L * 60 * multiplier);
-    case 0: // Minutes
-      return (60L * multiplier);
+  case 3: // Tens of hours
+    return (10L * SEC_PER_HOUR * multiplier);
+  case 2: // Hours
+    return (SEC_PER_HOUR * multiplier);
+  case 1: // Tens of minutes
+    return (10L * 60 * multiplier);
+  case 0: // Minutes
+    return (60L * multiplier);
   }
 }
 
-// Stateful values for setting a new time
-long newTime = 0;
-int inputPlace = 3;
+void updateFromSetTime() {
 
-State fromSetTime(Button input) {
+  static int inputPlace = 3;
 
   int multiplier;
-  switch (input) {
-    case Button::zero:
-      multiplier = 0;
-      break;
-    case Button::one:
-      multiplier = 1;
-      break;
-    case Button::two:
-      multiplier = 2;
-      break;
-    case Button::three:
-      multiplier = 3;
-      break;
-    case Button::four:
-      multiplier = 4;
-      break;
-    case Button::five:
-      multiplier = 5;
-      break;
-    case Button::six:
-      multiplier = 6;
-      break;
-    case Button::seven:
-      multiplier = 7;
-      break;
-    case Button::eight:
-      multiplier = 8;
-      break;
-    case Button::nine:
-      multiplier = 9;
-      break;
-    default:
-      return State::setTime;
+  switch (clock.input) {
+  case IRInput::zero:
+    multiplier = 0;
+    break;
+  case IRInput::one:
+    multiplier = 1;
+    break;
+  case IRInput::two:
+    multiplier = 2;
+    break;
+  case IRInput::three:
+    multiplier = 3;
+    break;
+  case IRInput::four:
+    multiplier = 4;
+    break;
+  case IRInput::five:
+    multiplier = 5;
+    break;
+  case IRInput::six:
+    multiplier = 6;
+    break;
+  case IRInput::seven:
+    multiplier = 7;
+    break;
+  case IRInput::eight:
+    multiplier = 8;
+    break;
+  case IRInput::nine:
+    multiplier = 9;
+    break;
+  default:
+    return;
   }
 
-  newTime += calcSecondsByHHMMPlace(inputPlace, multiplier);
+  clock.newTime += calcSecondsByHHMMPlace(inputPlace, multiplier);
 
-  // Done inputting
+  // Done inputting - update time, reset relevant setTime values, and change state to display
   if (inputPlace == 0) {
-    time = newTime;
-
-    // Reset stateful values for next time
+    clock.time = clock.newTime;
+    clock.newTime = 0;
     inputPlace = 3;
-    newTime = 0;
-    return State::displayTime;
+    clock.state = State::displayTime;
   }
-  else {
-    --inputPlace;
-    return State::setTime;
+  else --inputPlace;
+}
+
+// Dispatcher for building next state
+void updateState() {
+  switch (clock.state) {
+  case State::displayTime:    updateFromDisplayTime(); break;
+  case State::setTime:        updateFromSetTime(); break;
+  // case State::setAlarm:       return fromSetAlarm(input);
+  // case State::alarmTriggered: return State::alarmTriggered; // This state can only be left by the button interrupt
   }
 }
 
@@ -174,47 +190,35 @@ void secondsToHHMM(long seconds, char* buffer) {
   buffer[0] = String(hours / 10)[0];
 }
 
-void fromDisplayTime(State newState) {
+void displayHHMM(long seconds) {
   char hhmm[5];
-  secondsToHHMM(time, hhmm);
+  secondsToHHMM(seconds, hhmm);
   seg.setChars(hhmm);
 }
 
-void fromSetTime(State newState) {
-  if (time % 2 == 0)
+void displayFromSetTime() {
+  if (clock.time % 2 == 0)
     seg.blank();
   else {
-    char hhmm[5];
-    secondsToHHMM(newTime, hhmm);
-    seg.setChars(hhmm);
+    displayHHMM(clock.newTime);
   }
 }
 
-State buildNewState(State lastState, Button input) {
-  switch (lastState) {
-    case State::displayTime: return fromDisplayTime(input);
-    case State::setTime:     return fromSetTime(input);
-  }
-}
-
-void display(State newState) {
-  switch (newState) {
-    case State::displayTime: fromDisplayTime(newState); break;
-    case State::setTime:     fromSetTime(newState); break;
+// Dispatcher for rendering next display frame
+void display() {
+  switch (clock.state) {
+  case State::displayTime:    displayHHMM(clock.time); break;
+  case State::setTime:        displayFromSetTime(); break;
+  // case State::setAlarm:       displayHHMM(alarmTime); break;
+  // case State::alarmTriggered: fromDisplayTime(newState); break;
   }
   seg.refreshDisplay();
 }
 
+// Main read-eval-print loop (though the reading is done async by the serial handler...)
 void loop() {
-
-  // Get new input for processing and then clear the global value to indicate
-  // that it's been processed (like a queue with capacity of one)
-  Button newInput = input;
-  input = Button::none;
-
-  // Build new state based on previous state and new input
-  state = buildNewState(state, newInput);
-
-  // Rebuild display based on new state
-  display(state);
+  updateState();
+  // Clear input now that it's been processed
+  clock.input = IRInput::none;
+  display();
 }
