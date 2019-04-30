@@ -35,16 +35,12 @@ SevSeg seg;
 void setup() {
 
   // Initialize state
-  // TODO: Revert these
-  // clock.time = 0;
-  clock.time = 60;
+  clock.time = 0;
   clock.newTime = 0;
   clock.state = State::displayTime;
   clock.input = IRInput::none;
-  // clock.alarm = 0;
-  // clock.alarmEnabled = false;
-  clock.alarm = 120;
-  clock.alarmEnabled = true;
+  clock.alarm = 0;
+  clock.alarmEnabled = false;
 
   // Segment display init
   byte numDigits = 4;
@@ -76,7 +72,7 @@ void setup() {
 
   // Timer control register set Clock/1024 //
   TCCR1B |= (1 << WGM12);
-  // TCCR1B |= (1 << CS10);
+  TCCR1B |= (1 << CS10);
   TCCR1B |= (1 << CS12);
   TIMSK1  = (1 << OCIE1A);
   sei();
