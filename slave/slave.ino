@@ -4,6 +4,7 @@
 #define SLAVE_ADDR 0x09
 #define BTN_PIN 2
 #define LED_PIN 0
+#define BUZZER_PIN 1
 #define SEC_PER_HOUR 3600
 #define SEC_PER_DAY 86400
 
@@ -91,7 +92,7 @@ void buttonPressed() {
   if (clock.state == State::alarmTriggered) {
     clock.state = State::displayTime;
     digitalWrite(LED_PIN, LOW);
-    // TODO: Disable buzzer
+    noTone(BUZZER_PIN);
   }
 }
 
@@ -230,10 +231,10 @@ void updateState() {
 void secondsToHHMM(long seconds, char* buffer) {
   long minutes = (seconds/60) % 60;
   long hours = (seconds/SEC_PER_HOUR) % 24;
-  buffer[3] = String(minutes % 10)[0];
-  buffer[2] = String(minutes / 10)[0];
-  buffer[1] = String(hours % 10)[0];
   buffer[0] = String(hours / 10)[0];
+  buffer[1] = String(hours % 10)[0];
+  buffer[2] = String(minutes / 10)[0];
+  buffer[3] = String(minutes % 10)[0];
 }
 
 void displayHHMM(long seconds) {
@@ -251,10 +252,13 @@ void displayFromSetTime() {
 }
 
 void displayFromAlarmTriggered() {
-  if (clock.time % 2 == 0)
+  if (clock.time % 2 == 0) {
     digitalWrite(LED_PIN, LOW);
+    noTone(BUZZER_PIN);
+  }
   else {
     digitalWrite(LED_PIN, HIGH);
+    tone(BUZZER_PIN, 440);
     displayHHMM(clock.time);
   }
 }
