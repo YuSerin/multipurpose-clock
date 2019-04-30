@@ -21,7 +21,9 @@ struct Clock {
   State state;
   long time; // We're measuring seconds as the most granular unit of time
   long newTime; // For setting a new time
+  long alarm;
   IRInput input; // Most recent unprocessed input
+  bool alarmEnabled;
 } clock; // Need a global instance of this for the interrupt handlers to use
 
 SevSeg seg;
@@ -32,10 +34,16 @@ SevSeg seg;
 void setup() {
 
   // Initialize state
-  clock.time = 0;
+  // TODO: Revert these
+  // clock.time = 0;
+  clock.time = 60;
   clock.newTime = 0;
   clock.state = State::displayTime;
   clock.input = IRInput::none;
+  // clock.alarm = 0;
+  // clock.alarmEnabled = false;
+  clock.alarm = 120;
+  clock.alarmEnabled = true;
 
   // Segment display init
   byte numDigits = 4;
@@ -49,7 +57,7 @@ void setup() {
 
   // Button init
   pinMode(BTN_PIN, INPUT_PULLUP);
-  attachInterrupt(0,btn_pressed,FALLING);
+  attachInterrupt(digitalPinToInterrupt(BTN_PIN), buttonPressed, FALLING);
 
   // Serial comms init
   Wire.begin(SLAVE_ADDR);
@@ -67,7 +75,7 @@ void setup() {
 
   // Timer control register set Clock/1024 //
   TCCR1B |= (1 << WGM12);
-  TCCR1B |= (1 << CS10);
+  // TCCR1B |= (1 << CS10);
   TCCR1B |= (1 << CS12);
   TIMSK1  = (1 << OCIE1A);
   sei();
@@ -79,10 +87,13 @@ ISR(TIMER1_COMPA_vect) {
     clock.time = 0;
 }
 
-void btn_pressed()
-{
+void buttonPressed() {
+  if (clock.state == State::alarmTriggered) {
+    clock.state = State::displayTime;
+    digitalWrite(LED_PIN, LOW);
+    // TODO: Disable buzzer
+  }
 }
-
 
 void recvEvent(int bytes) {
   while(Wire.available()) {
@@ -90,16 +101,18 @@ void recvEvent(int bytes) {
   }
 }
 
-
 // State builders
 
 void updateFromDisplayTime() {
+
   switch (clock.input) {
   case IRInput::one:
     clock.state = State::setTime;
     break;
   case IRInput::two:
     clock.state = State::setAlarm;
+  case IRInput::power:
+    clock.alarmEnabled = !clock.alarmEnabled;
   default:
     return;
   }
@@ -118,9 +131,7 @@ long calcSecondsByHHMMPlace(int place, int multiplier) {
   }
 }
 
-void updateFromSetTime() {
-
-  static int inputPlace = 3;
+int getMultiplierFromInput() {
 
   int multiplier;
   switch (clock.input) {
@@ -155,12 +166,21 @@ void updateFromSetTime() {
     multiplier = 9;
     break;
   default:
-    return;
+    return -1; // Signifies that a non-numeric button was pressed and should be ignored
   }
+  return multiplier;
+}
+
+void updateFromSetTime() {
+
+  static int inputPlace = 3;
+
+  int multiplier = getMultiplierFromInput();
+  if (multiplier == -1) return; // Invalid input - ignore it
 
   clock.newTime += calcSecondsByHHMMPlace(inputPlace, multiplier);
 
-  // Done inputting - update time, reset relevant setTime values, and change state to display
+  // Done inputting - update time, reset relevant values, and change state to display
   if (inputPlace == 0) {
     clock.time = clock.newTime;
     clock.newTime = 0;
@@ -170,12 +190,38 @@ void updateFromSetTime() {
   else --inputPlace;
 }
 
+void updateFromSetAlarm() {
+
+  static int inputPlace = 3;
+
+  if (inputPlace == 3)
+    clock.alarm = 0; // Reset to zero in case it was previously set
+
+  int multiplier = getMultiplierFromInput();
+  if (multiplier == -1) return; // Invalid input - ignore it
+
+  clock.alarm += calcSecondsByHHMMPlace(inputPlace, multiplier);
+
+  // Done inputting - set alarm, reset relevant values, and change state to display
+  if (inputPlace == 0) {
+    inputPlace = 3;
+    clock.state = State::displayTime;
+    clock.alarmEnabled = true;
+  }
+  else --inputPlace;
+}
+
 // Dispatcher for building next state
 void updateState() {
+  // Check for triggers
+  if (clock.alarmEnabled && clock.time == clock.alarm) {
+    clock.state = State::alarmTriggered;
+    return;
+  }
   switch (clock.state) {
   case State::displayTime:    updateFromDisplayTime(); break;
   case State::setTime:        updateFromSetTime(); break;
-  // case State::setAlarm:       return fromSetAlarm(input);
+  case State::setAlarm:       updateFromSetAlarm(); break;
   // case State::alarmTriggered: return State::alarmTriggered; // This state can only be left by the button interrupt
   }
 }
@@ -204,13 +250,22 @@ void displayFromSetTime() {
   }
 }
 
+void displayFromAlarmTriggered() {
+  if (clock.time % 2 == 0)
+    digitalWrite(LED_PIN, LOW);
+  else {
+    digitalWrite(LED_PIN, HIGH);
+    displayHHMM(clock.time);
+  }
+}
+
 // Dispatcher for rendering next display frame
 void display() {
   switch (clock.state) {
   case State::displayTime:    displayHHMM(clock.time); break;
   case State::setTime:        displayFromSetTime(); break;
-  // case State::setAlarm:       displayHHMM(alarmTime); break;
-  // case State::alarmTriggered: fromDisplayTime(newState); break;
+  case State::setAlarm:       displayHHMM(clock.alarm); break;
+  case State::alarmTriggered: displayFromAlarmTriggered(); break;
   }
   seg.refreshDisplay();
 }
