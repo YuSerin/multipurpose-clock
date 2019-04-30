@@ -1,6 +1,7 @@
 #include <IRremote.h>
 #include <Wire.h>
 #include <LiquidCrystal.h>
+#include <SimpleDHT.h>
 
 #define SLAVE_ADDR 0x09
 #define RECV_PIN A2
@@ -44,6 +45,14 @@ Button getButtonRepresentation(int rawValue) {
     }
 }
 
+//set pin for temperature and humidity sensor
+int pinDHT11 = 2;
+SimpleDHT11 dht11;
+//variables for reading temperature and humidity
+byte temperature = 0;
+byte humidity = 0;
+byte data[40] = {0};
+
 void setup()
 {
   Serial.begin(9600);
@@ -61,11 +70,27 @@ void setup()
 
 void loop()
 {
+  //DHT11 sampling rate is 1HZ
+  if(millis() % 1000 == 0)
+  {
+    //read then print temperature and humidity next to the menu
+    dht11.read(pinDHT11, &temperature, &humidity, data);
+    lcd.setCursor(16,0); lcd.print(" ");
+    lcd.setCursor(16,1); lcd.print(" ");
+    lcd.setCursor(12, 0); lcd.print(temperature); lcd.print("*C");
+    lcd.setCursor(12, 1); lcd.print(humidity); lcd.print("%");
+
+    //reset cursor
+    lcd.setCursor(0,0);
+    Serial.println("bep");
+  }
+  
   if (irrecv.decode(&results))
     {
       Button input = getButtonRepresentation(results.value);
       transmit(input);
-      switch (input){
+      switch (input)
+      {
         case Button::up:
           menuPage--;
           printMenu(menuPage);
@@ -74,12 +99,23 @@ void loop()
           menuPage++;
           printMenu(menuPage);
           break;
+        case Button::one:
+          menuPage = 1;
+          setTheTime();
+          printMenu(menuPage);
+          break;
+        case Button::two:
+          menuPage = 1;
+          setTheAlarm();
+          printMenu(menuPage);
+          break;
       }
       delay(100);
       irrecv.resume(); // Receive the next value
     }
 }
 
+//sends pressed button representation to slave arduino
 void transmit(Button button)
 {
   Wire.beginTransmission(SLAVE_ADDR);
@@ -87,27 +123,113 @@ void transmit(Button button)
   Wire.endTransmission();
 }
 
+//prints the menu to the LCD based on which page the user is on,
+//which is determined by the up/down buttons.
 void printMenu(int menuPage)
 {
+  //error check menu pages
   if(menuPage < 1)
     menuPage = 1;
   if(menuPage > 2)
     menuPage = 2;
 
+  //switch to print menu options depending on page
   switch(menuPage){
     case 1:
       lcd.clear();
       lcd.setCursor(0,0);
-      lcd.print("1: Set Time");
+      lcd.print("1:Set Time");
       lcd.setCursor(0,1);
-      lcd.print("2: Set Alarm");
+      lcd.print("2:Set Alarm");
     break;
     case 2:
       lcd.clear();
       lcd.setCursor(0,0);
-      lcd.print("3: ");
+      lcd.print("3:");
       lcd.setCursor(0,1);
-      lcd.print("4: ");
+      lcd.print("4:");
     break;
   }
+}
+
+//puts the master arduino into set time mode while the slave arduino is
+//so weird things don't happen
+//also prints instructions to LCD to let user know that it is in this mode
+void setTheTime()
+{
+  //so it doesn't send 1 as an input
+  delay(200);
+  irrecv.resume();
+  //counter for button recieve count
+  int count = 0;
+  //print instructions
+  printSetTimeInstructions();
+  //loop for set time mode, ends after 4 button presses
+  //ASSUMPTION: The user will enter 4 digits and not press any other buttons!!!
+  while(count != 4)
+  {
+    //if a button is pressed
+    if (irrecv.decode(&results))
+    {
+      //interpret and send to slave for setting time
+      Button input = getButtonRepresentation(results.value);
+      transmit(input);
+      //increment the counter because a button was pressed
+      count++;
+      //get ready to recieve another button press
+      delay(100);
+      irrecv.resume();
+    }
+  }
+}
+
+//prints instructions to LCD to signal that user is in set time mode
+void printSetTimeInstructions()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set time new 24-");
+  lcd.setCursor(0,1);
+  lcd.print("hour time");
+}
+
+//puts the master arduino into set alarm mode while the slave arduino is
+//so weird things don't happen
+//also prints instructions to LCD to let user know that it is in this mode
+void setTheAlarm()
+{
+  //so it doesn't send 1 as an input
+  delay(200);
+  irrecv.resume();
+  //counter for button recieve count
+  int count = 0;
+  //print instructions
+  printSetTimeInstructions();
+  //loop for set alarm mode, ends after 4 button presses
+  //ASSUMPTION: The user will enter 4 digits and not press any other buttons!!!
+  while(count != 4)
+  {
+    //if a button is pressed
+    if (irrecv.decode(&results))
+    {
+      //interpret and send to slave for setting time
+      Button input = getButtonRepresentation(results.value);
+      transmit(input);
+      //increment the counter because a button was pressed
+      count++;
+      //get ready to recieve another button press
+      delay(100);
+      irrecv.resume();
+    }
+  }
+}
+
+//prints instructions to LCD to signal that user is in set alarm mode
+void printSetAlarmInstructions()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set alarm with");
+  lcd.setCursor(0,1);
+  lcd.print("24-hour time");
 }
