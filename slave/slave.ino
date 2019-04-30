@@ -23,8 +23,8 @@ struct Clock {
   long time; // We're measuring seconds as the most granular unit of time
   long newTime; // For setting a new time
   long alarm;
-  IRInput input; // Most recent unprocessed input
   bool alarmEnabled;
+  IRInput input; // Most recent unprocessed input
 } clock; // Need a global instance of this for the interrupt handlers to use
 
 SevSeg seg;
@@ -190,22 +190,43 @@ void updateFromSetTime() {
 void updateFromSetAlarm() {
 
   static int inputPlace = 3;
+  static bool done = false;
+  static int stateChangeDelay = 1000;
 
-  if (inputPlace == 3)
-    clock.alarm = 0; // Reset to zero in case it was previously set
+  if (!done) {
+    if (inputPlace == 3)
+      clock.alarm = 0; // Reset to zero in case it was previously set
 
-  int multiplier = getMultiplierFromInput();
-  if (multiplier == -1) return; // Invalid input - ignore it
+    int multiplier = getMultiplierFromInput();
+    if (multiplier == -1) return; // Invalid input - ignore it
 
-  clock.alarm += calcSecondsByHHMMPlace(inputPlace, multiplier);
+    clock.alarm += calcSecondsByHHMMPlace(inputPlace, multiplier);
 
-  // Done inputting - set alarm, reset relevant values, and change state to display
-  if (inputPlace == 0) {
-    inputPlace = 3;
-    clock.state = State::displayTime;
-    clock.alarmEnabled = true;
+    // Mark as done
+    if (inputPlace == 0) {
+      done = true;
+    }
+    else --inputPlace;
   }
-  else --inputPlace;
+  else {
+    // TODO:
+    // This solution really sucks. The real solution would be to run the segment
+    // display refresh asynchronously (the other timer interrupt maybe?).
+
+    // Doing this so that the user can see the last digit that was entered.
+    // We can't just use delay, because we have to constantly refresh the segment,
+    // so we'll just do some stupid busy waiting.
+    // This is the actual end of this state, so we'll (re)set variables here
+    --stateChangeDelay;
+    if (stateChangeDelay == 0) {
+      inputPlace = 3;
+      done = false;
+      stateChangeDelay = 1000;
+      clock.alarmEnabled = true;
+      clock.state = State::displayTime;
+    }
+  }
+
 }
 
 // Dispatcher for building next state
