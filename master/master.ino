@@ -18,7 +18,7 @@ enum class Button {
 LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 int menuPage;
 
-Button getButtonRepresentation(int rawValue) {
+Button getButtonRepresentation(long rawValue) {
     switch (rawValue) {
       case 0xffa25d:   Serial.println("power");        return Button::power;
       case 0xffe21d:   Serial.println("func/stop");    return Button::funcStop;
@@ -75,8 +75,8 @@ void loop()
   {
     //read then print temperature and humidity next to the menu
     dht11.read(pinDHT11, &temperature, &humidity, data);
-    lcd.setCursor(16,0); lcd.print(" ");
-    lcd.setCursor(16,1); lcd.print(" ");
+//    lcd.setCursor(16,0); lcd.print(" ");
+//    lcd.setCursor(16,1); lcd.print(" ");
     lcd.setCursor(12, 0); lcd.print(temperature); lcd.print("*C");
     lcd.setCursor(12, 1); lcd.print(humidity); lcd.print("%");
 
@@ -109,6 +109,17 @@ void loop()
           setTheAlarm();
           printMenu(menuPage);
           break;
+        case Button::three:
+          menuPage = 2;
+          setTimer();
+          printMenu(menuPage);
+          break;
+        case Button::four:
+          menuPage = 2;
+          printStopwatchInstructions();
+          break;
+        case Button::power:
+          printMenu(menuPage);
       }
       delay(100);
       irrecv.resume(); // Receive the next value
@@ -145,11 +156,21 @@ void printMenu(int menuPage)
     case 2:
       lcd.clear();
       lcd.setCursor(0,0);
-      lcd.print("3:");
+      lcd.print("3:Timer");
       lcd.setCursor(0,1);
-      lcd.print("4:");
+      lcd.print("4:Stopwatch");
     break;
   }
+}
+
+//prints instructions to LCD to signal that user is in stopwatch mode
+void printStopwatchInstructions()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Use button");
+  lcd.setCursor(0,1);
+  lcd.print("to stop");
 }
 
 //puts the master arduino into set time mode while the slave arduino is
@@ -204,7 +225,7 @@ void setTheAlarm()
   //counter for button recieve count
   int count = 0;
   //print instructions
-  printSetTimeInstructions();
+  printSetAlarmInstructions();
   //loop for set alarm mode, ends after 4 button presses
   //ASSUMPTION: The user will enter 4 digits and not press any other buttons!!!
   while(count != 4)
@@ -232,4 +253,44 @@ void printSetAlarmInstructions()
   lcd.print("Set alarm with");
   lcd.setCursor(0,1);
   lcd.print("24-hour time");
+}
+
+//puts the master arduino into set timer mode and pass input to the slave arduino
+//also prints instructions to LCD to let user know that it is in this mode
+void setTimer()
+{
+  //so it doesn't send 1 as an input
+  delay(200);
+  irrecv.resume();
+  //counter for button recieve count
+  int count = 0;
+  //print instructions
+  printSetTimerInstructions();
+  //loop for set alarm mode, ends after 4 button presses
+  //ASSUMPTION: The user will enter 4 digits and not press any other buttons!!!
+  while(count != 4)
+  {
+    //if a button is pressed
+    if (irrecv.decode(&results))
+    {
+      //interpret and send to slave for setting time
+      Button input = getButtonRepresentation(results.value);
+      transmit(input);
+      //increment the counter because a button was pressed
+      count++;
+      //get ready to recieve another button press
+      delay(100);
+      irrecv.resume();
+    }
+  }
+}
+
+//prints instructions to LCD to signal that user is in set timer mode
+void printSetTimerInstructions()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set timer: mmss");
+  lcd.setCursor(0,1);
+  lcd.print("m=min s=sec");
 }

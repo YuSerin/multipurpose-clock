@@ -15,7 +15,8 @@ enum class IRInput {
 };
 
 enum class State {
-  setTime, displayTime, setAlarm, alarmTriggered
+  setTime, displayTime, setAlarm, alarmTriggered, 
+  setTimer, displayTimer, startSW, endSW
 };
 
 struct Clock {
@@ -24,6 +25,9 @@ struct Clock {
   long newTime; // For setting a new time
   long alarm;
   bool alarmEnabled;
+  long timer;
+  bool timerEnabled;
+  long stopwatch;
   IRInput input; // Most recent unprocessed input
 } clock; // Need a global instance of this for the interrupt handlers to use
 
@@ -41,6 +45,9 @@ void setup() {
   clock.input = IRInput::none;
   clock.alarm = 0;
   clock.alarmEnabled = false;
+  clock.timer = 0;
+  clock.timerEnabled = false;
+  clock.stopwatch = 0;
 
   // Segment display init
   byte numDigits = 4;
@@ -80,8 +87,9 @@ void setup() {
 
 ISR(TIMER1_COMPA_vect) {
   ++clock.time;
-  if (clock.time == SEC_PER_DAY)
-    clock.time = 0;
+  if (clock.time == SEC_PER_DAY) clock.time = 0;
+  if(clock.state == State::displayTimer && clock.timer > 0) --clock.timer;
+  if(clock.state == State::startSW) ++clock.stopwatch;
 }
 
 void buttonPressed() {
@@ -89,7 +97,12 @@ void buttonPressed() {
     clock.state = State::displayTime;
     digitalWrite(LED_PIN, LOW);
     noTone(BUZZER_PIN);
+    
+    if(clock.timerEnabled) clock.timerEnabled = false;
   }
+  if(clock.state == State::startSW) {
+    clock.state = State::endSW;
+  } else if(clock.state == State::endSW) clock.state = State::startSW;
 }
 
 void recvEvent(int bytes) {
@@ -109,7 +122,16 @@ void updateFromDisplayTime() {
   case IRInput::two:
     clock.state = State::setAlarm;
   case IRInput::power:
+    clock.state = State::displayTime;
     clock.alarmEnabled = !clock.alarmEnabled;
+    break;
+  case IRInput::three:
+    clock.state = State::setTimer;
+    break;
+  case IRInput::four:
+    clock.state = State::startSW;
+    clock.stopwatch = 0;
+    break;
   default:
     return;
   }
@@ -125,6 +147,19 @@ long calcSecondsByHHMMPlace(int place, int multiplier) {
     return (10L * 60 * multiplier);
   case 0: // Minutes
     return (60L * multiplier);
+  }
+}
+
+long calcSecondsByMMSSPlace(int place, int multiplier) {
+  switch (place) {
+  case 3: // Tens of minutes
+    return (10L * 60 * multiplier);
+  case 2: // minutes
+    return (60L * multiplier);
+  case 1: // Tens of seconds
+    return (10L * multiplier);
+  case 0: // seconds
+    return multiplier;
   }
 }
 
@@ -187,6 +222,26 @@ void updateFromSetTime() {
   else --inputPlace;
 }
 
+void updateFromSetTimer() {
+  static int inputPlace = 3;
+
+  // Resetting the timer if previously set //
+  if(inputPlace == 3) clock.timer = 0;
+  
+  int multiplier = getMultiplierFromInput();
+  if (multiplier == -1) return; // Invalid input - ignore it
+
+  clock.timer += calcSecondsByMMSSPlace(inputPlace, multiplier);
+  
+  if (inputPlace == 0) 
+  {
+    inputPlace = 3;
+    clock.timerEnabled = true;
+    clock.state = State::displayTimer;
+  }
+  else --inputPlace;
+}
+
 void updateFromSetAlarm() {
 
   static int inputPlace = 3;
@@ -236,10 +291,19 @@ void updateState() {
     clock.state = State::alarmTriggered;
     return;
   }
+  
+  if(clock.timerEnabled && clock.timer == 0) {
+    clock.state = State::alarmTriggered;
+    return;
+  }
+  
   switch (clock.state) {
   case State::displayTime:    updateFromDisplayTime(); break;
   case State::setTime:        updateFromSetTime(); break;
   case State::setAlarm:       updateFromSetAlarm(); break;
+  case State::setTimer:       updateFromSetTimer(); break;
+  case State::displayTimer:   updateFromDisplayTime(); break;
+  case State::endSW:          updateFromDisplayTime(); break;
   // case State::alarmTriggered: return State::alarmTriggered; // This state can only be left by the button interrupt
   }
 }
@@ -254,10 +318,25 @@ void secondsToHHMM(long seconds, char* buffer) {
   buffer[3] = String(minutes % 10)[0];
 }
 
+void secondsToMMSS(long seconds, char* buffer) {
+  long minutes = (seconds/60) % 60;
+  long sec = seconds - (minutes * 60);
+  buffer[0] = String(minutes / 10)[0];
+  buffer[1] = String(minutes % 10)[0];
+  buffer[2] = String(sec / 10)[0];
+  buffer[3] = String(sec % 10)[0];
+}
+
 void displayHHMM(long seconds) {
   char hhmm[5];
   secondsToHHMM(seconds, hhmm);
   seg.setChars(hhmm);
+}
+
+void displayMMSS(long seconds) {
+  char mmss[5];
+  secondsToMMSS(seconds, mmss);
+  seg.setChars(mmss);
 }
 
 void displayFromSetTime() {
@@ -266,6 +345,10 @@ void displayFromSetTime() {
   else {
     displayHHMM(clock.newTime);
   }
+}
+
+void displayFromSetTimer() {
+   displayMMSS(clock.timer);
 }
 
 void displayFromAlarmTriggered() {
@@ -280,6 +363,14 @@ void displayFromAlarmTriggered() {
   }
 }
 
+void displayEndSW() {
+   if (clock.time % 2 == 0)
+      seg.blank();
+  else {
+    displayMMSS(clock.stopwatch);
+  }
+}
+
 // Dispatcher for rendering next display frame
 void display() {
   switch (clock.state) {
@@ -287,6 +378,10 @@ void display() {
   case State::setTime:        displayFromSetTime(); break;
   case State::setAlarm:       displayHHMM(clock.alarm); break;
   case State::alarmTriggered: displayFromAlarmTriggered(); break;
+  case State::setTimer:       displayFromSetTimer(); break;
+  case State::displayTimer:   displayMMSS(clock.timer); break;
+  case State::startSW:        displayMMSS(clock.stopwatch); break;
+  case State::endSW:          displayEndSW(); break;
   }
   seg.refreshDisplay();
 }
